@@ -11,15 +11,10 @@
 /**
  * Headers compose — emits the headers-spec layout (rules R1–R8 in
  * headers-spec.js) into a React.xcframework and builds the headers-only
- * ReactNativeHeaders.xcframework beside it.
- *
- * The prebuild compose step (xcframework.js) emits the layout into the freshly
- * composed React.xcframework's slices and builds ReactNativeHeaders.xcframework
- * beside it — BEFORE signing (R7). `ensureHeadersLayout()` applies the same
- * emission to an already-cached artifact (binaries are header-independent) for
- * tooling that composes on demand.
- *
- * One projector, spec-driven, byte-identical output either way.
+ * ReactNativeHeaders.xcframework beside it. The prebuild path (xcframework.js)
+ * composes before signing (R7); `ensureHeadersLayout()` applies the same
+ * emission to an already-cached artifact. One projector, spec-driven,
+ * byte-identical output either way.
  */
 
 const {computeInventory} = require('./headers-inventory');
@@ -69,7 +64,7 @@ function stageEntries(
 
 /**
  * Emits the React.framework side of the spec (R1, R4, R6) into every slice
- * of an xcframework: Headers root = React/ ∪ react/ hoisted + bare aliases,
+ * of an xcframework: Headers root = React/ hoisted to root + bare aliases,
  * generated umbrella + framework module map. Replaces each slice's Headers
  * and Modules. The xcframework's ROOT Headers/ (the CocoaPods header surface)
  * is left untouched.
@@ -156,12 +151,10 @@ function buildReactNativeHeadersXcframework(
   depsHeaders /*: string */,
   rnRoot /*: string */,
   includeCatalyst /*: boolean */ = false,
-  // Optional dir containing a `hermes/` namespace (the Hermes public C++ API
-  // headers, `destroot/include` from the hermes-ios tarball). Folded in as a
-  // textual namespace — like folly/glog, no clang module — so `<hermes/...>`
-  // resolves for any RN-linking target without per-library wiring. null when
-  // the Hermes headers aren't staged (then `<hermes/...>` stays unavailable,
-  // i.e. the pre-fold behavior).
+  // Optional dir containing a `hermes/` namespace (Hermes public headers from
+  // the hermes-ios tarball's destroot/include). Folded in as a textual
+  // namespace like folly/glog so `<hermes/...>` resolves without per-library
+  // wiring. null when unstaged — then `<hermes/...>` stays unavailable.
   hermesHeaders /*: ?string */ = null,
 ) /*: string */ {
   // ---- stage headers ----

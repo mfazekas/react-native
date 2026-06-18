@@ -171,8 +171,8 @@ function scanHeader(text /*: string */) /*: {
           top === 'cpp' ? 'notcpp' : top === 'notcpp' ? 'cpp' : 'other',
         );
       } else if (directive === 'elif') {
-        const popped = stack.pop() ?? 'other';
-        stack.push(mentionsCpp ? 'cpp' : popped === 'cpp' ? 'other' : 'other');
+        stack.pop();
+        stack.push(mentionsCpp ? 'cpp' : 'other');
       } else if (directive === 'endif') {
         stack.pop();
       }
@@ -503,7 +503,6 @@ function classifyEntries(
     }
   }
 }
-
 
 function main() /*: void */ {
   const argv = process.argv.slice(2);

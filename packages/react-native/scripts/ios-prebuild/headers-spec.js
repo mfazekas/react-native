@@ -17,17 +17,20 @@
  *
  * The rules:
  *
- * R1. React.framework/Headers ROOT serves BOTH the `React/` and `react/`
- *     namespaces (their contents hoisted to root, collision-checked) plus
- *     the bare root aliases. Rationale: framework lookup unifies framework
- *     names case-insensitively — `<react/renderer/...>` resolves through
- *     React.framework — and the framework name supplies the `React/` prefix
- *     so `<React/RCTBridge.h>` works verbatim.
- * R2. Every other namespace ships in ONE headers-only library xcframework
- *     ("ReactNativeHeaders"), namespace dirs at its Headers root, INCLUDING
- *     the third-party deps namespaces (folly/glog/boost/fmt/double-conversion/
- *     fast_float, sourced from the deps artifact) — making
- *     ReactNativeDependencies binary-only.
+ * R1. React.framework/Headers ROOT serves the `React/` namespace (contents
+ *     hoisted to root) plus the bare root aliases. The framework name supplies
+ *     the `React/` prefix, so `<React/RCTBridge.h>` resolves verbatim through
+ *     FRAMEWORK_SEARCH_PATHS. The `react/` (lowercase) namespace is NOT here —
+ *     it ships in ReactNativeHeaders (R2). Resolving it through React.framework
+ *     would require case-folding `react.framework` → `React.framework`, which
+ *     only works on case-insensitive filesystems; the header-search-path route
+ *     is exact and works everywhere.
+ * R2. Every other namespace (incl. `react/`) ships in ONE headers-only library
+ *     xcframework ("ReactNativeHeaders"), namespace dirs at its Headers root,
+ *     INCLUDING the third-party deps namespaces (folly/glog/boost/fmt/
+ *     double-conversion/fast_float, sourced from the deps artifact) — making
+ *     ReactNativeDependencies binary-only. Served by exact header-search-path
+ *     lookup, so resolution is filesystem-case-independent.
  * R3. NO include rewriting anywhere — source headers are byte-identical to
  *     the repo (content authority = source files; layout authority = this
  *     spec). Consumers compile unchanged except bare-form angle includes
@@ -42,7 +45,10 @@
  *     non-modular framework headers; yoga + RCTDeprecation found
  *     empirically). Namespaces whose name is not a valid module identifier
  *     (e.g. jsinspector-modern) are exempt — they have no candidates today;
- *     the verifier asserts that stays true.
+ *     the verifier asserts that stays true. `react/` is also exempt: its few
+ *     objc-modular-candidates stay textual (as they already were inside
+ *     React.framework) so no `react` module aliases the `React` framework
+ *     module.
  * R6. Bare root aliases are servable only as `<React/X>` — bare angle forms
  *     (`#import <RCTAppDelegate.h>`) have no framework spelling. This is the
  *     accepted, measured consumer migration (~4 lines ecosystem-wide).
@@ -126,8 +132,8 @@ function planFromInventory(manifest /*: any */) /*: HeadersSpecPlan */ {
     let bucketKey;
     let entryList;
     let relPath;
-    if (np.startsWith('React/') || np.startsWith('react/')) {
-      relPath = np.slice(6); // R1: hoist both namespaces to the root
+    if (np.startsWith('React/')) {
+      relPath = np.slice(6); // R1: hoist React/ to the framework Headers root
       bucketKey = `React.framework/${relPath}`;
       entryList = react;
     } else if (!np.includes('/')) {
@@ -135,7 +141,9 @@ function planFromInventory(manifest /*: any */) /*: HeadersSpecPlan */ {
       bucketKey = `React.framework/${relPath}`;
       entryList = react;
     } else {
-      relPath = np; // R2: namespace dir preserved in ReactNativeHeaders
+      // R2: every other namespace (incl. react/) keeps its prefix and is
+      // served from ReactNativeHeaders via the header search path.
+      relPath = np;
       bucketKey = `ReactNativeHeaders/${relPath}`;
       entryList = reactNativeHeaders;
     }
@@ -153,10 +161,12 @@ function planFromInventory(manifest /*: any */) /*: HeadersSpecPlan */ {
     if (np.startsWith('React/') && isUmbrellaSafe(h)) {
       umbrella.push(np);
     }
-    // R5: namespace modules (only for ReactNativeHeaders namespaces).
+    // R5: namespace modules (only for ReactNativeHeaders namespaces). `react/`
+    // is exempt — its few modular candidates stay textual so no `react` module
+    // aliases the `React` framework module.
     if (entryList === reactNativeHeaders) {
       const ns = np.split('/')[0];
-      if (MODULE_IDENT_RE.test(ns) && isUmbrellaSafe(h)) {
+      if (ns !== 'react' && MODULE_IDENT_RE.test(ns) && isUmbrellaSafe(h)) {
         if (!namespaceModules[ns]) {
           namespaceModules[ns] = [];
         }

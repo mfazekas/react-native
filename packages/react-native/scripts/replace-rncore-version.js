@@ -99,17 +99,19 @@ function replaceRNCoreConfiguration(
       throw new Error(`tar extraction failed with exit code ${result.status}`);
     }
 
-    // Verify extraction produced the expected xcframework structure
+    // Verify extraction produced the expected xcframework structure. The
+    // module map now lives per-slice inside React.framework, so check the
+    // xcframework's Info.plist instead of a root Modules/module.modulemap.
     const xcfwPath = path.join(tmpExtractDir, 'React.xcframework');
-    const modulemapPath = path.join(xcfwPath, 'Modules', 'module.modulemap');
-    if (!fs.existsSync(modulemapPath)) {
+    const infoPlistPath = path.join(xcfwPath, 'Info.plist');
+    if (!fs.existsSync(infoPlistPath)) {
       throw new Error(
-        `Extraction verification failed: ${modulemapPath} not found`,
+        `Extraction verification failed: ${infoPlistPath} not found`,
       );
     }
 
-    // Delete all directories in finalLocation - not files, since we want to
-    // keep the React-VFS.yaml file
+    // Delete only directories in finalLocation (e.g. the React.xcframework) -
+    // not files, so any sibling files written during pod install are preserved.
     const dirs = fs
       .readdirSync(finalLocation, {withFileTypes: true})
       .filter(dirent => dirent.isDirectory());
@@ -142,6 +144,37 @@ function replaceRNCoreConfiguration(
             `cp fallback failed with exit code ${cpResult.status}`,
           );
         }
+      }
+    }
+
+    // The podspec prepare_command flattens ReactNativeHeaders' headers into a
+    // top-level Headers/ dir, but it does not re-run on a config swap. Mirror
+    // it here: re-flatten the headers (identical across slices) and drop the
+    // now-redundant xcframework so $(PODS_ROOT)/React-Core-prebuilt/Headers
+    // keeps resolving <react/...>, <yoga/...>, etc.
+    const rnhXcfw = path.join(finalLocation, 'ReactNativeHeaders.xcframework');
+    if (fs.existsSync(rnhXcfw)) {
+      const slice = fs
+        .readdirSync(rnhXcfw, {withFileTypes: true})
+        .find(
+          dirent =>
+            dirent.isDirectory() &&
+            fs.existsSync(path.join(rnhXcfw, dirent.name.toString(), 'Headers')),
+        );
+      if (slice) {
+        const headersDest = path.join(finalLocation, 'Headers');
+        fs.rmSync(headersDest, {force: true, recursive: true});
+        const cpHeaders = spawnSync(
+          'cp',
+          ['-R', path.join(rnhXcfw, slice.name.toString(), 'Headers'), headersDest],
+          {stdio: 'inherit'},
+        );
+        if (cpHeaders.status !== 0) {
+          throw new Error(
+            `Flattening ReactNativeHeaders failed with exit code ${cpHeaders.status}`,
+          );
+        }
+        fs.rmSync(rnhXcfw, {force: true, recursive: true});
       }
     }
   } finally {

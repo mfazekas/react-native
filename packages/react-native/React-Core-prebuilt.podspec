@@ -17,36 +17,51 @@ Pod::Spec.new do |s|
   s.author                 = "Meta Platforms, Inc. and its affiliates"
   s.platforms              = min_supported_versions
   s.source                 = source
+
+  # We vend two xcframeworks that ship together in the prebuilt tarball:
+  #  - React.xcframework: the compiled core. Its per-slice React.framework carries
+  #    every <React/...> header + the framework module map, so `#import <React/...>`
+  #    and `@import React;` resolve through FRAMEWORK_SEARCH_PATHS automatically.
+  #  - ReactNativeHeaders.xcframework: headers-only. Carries every other namespace
+  #    (<react/...>, <yoga/...>, folly, glog, ...). Its headers are flattened into a
+  #    top-level Headers/ (see prepare_command) and exposed via the standard pod
+  #    header search path. (<hermes/...> is supplied by the hermes-engine pod here;
+  #    it is folded into ReactNativeHeaders only on the SwiftPM consumer side.)
+  # There is no clang VFS overlay.
   s.vendored_frameworks    = "React.xcframework"
 
   s.preserve_paths       = '**/*.*'
-  s.header_mappings_dir  = 'React.xcframework/Headers'
-  s.source_files         = 'React.xcframework/Headers/**/*.{h,hpp}'
-
-  s.module_name          = 'React'
-  s.module_map           = 'React.xcframework/Modules/module.modulemap'
-  s.public_header_files  = 'React.xcframework/Headers/**/*.h'
+  s.header_mappings_dir  = 'Headers'
+  s.source_files         = 'Headers/**/*.{h,hpp}'
+  s.public_header_files  = 'Headers/**/*.h'
 
   add_rn_third_party_dependencies(s)
 
-  # We need to make sure that the React.xcframework is copied correctly - in the downloaded tarball
-  # the root directory is the framework, but when using it we need to have it in a subdirectory
-  # called React.xcframework, so we need to move the contents of the tarball into that directory.
-  # This is done in the prepare_command.
-  # We need to make sure that the headers are copied to the right place - local tar.gz has a different structure
-  # than the one from the maven repo
+  # The downloaded tarball ships React.xcframework and ReactNativeHeaders.xcframework
+  # at its root. We make sure React.xcframework is in its own subdirectory (the Maven
+  # tarball lays the framework contents at the root; the local tar.gz has a different
+  # structure) and flatten ReactNativeHeaders' headers into a top-level Headers/ dir
+  # so CocoaPods exposes them on the header search path.
   s.prepare_command = <<~'CMD'
     CURRENT_PATH=$(pwd)
     XCFRAMEWORK_PATH="${CURRENT_PATH}/React.xcframework"
 
-    # Check if XCFRAMEWORK_PATH is empty
-    if [ -z "$XCFRAMEWORK_PATH" ]; then
-      echo "ERROR: XCFRAMEWORK_PATH is empty."
-      exit 0
+    # Flatten ReactNativeHeaders' headers (identical across slices) into Headers/
+    # BEFORE we sweep stray root entries into React.xcframework.
+    mkdir -p Headers
+    RNH_XCFRAMEWORK_PATH=$(find "$CURRENT_PATH" -type d -name "ReactNativeHeaders.xcframework" | head -n 1)
+    if [ -n "$RNH_XCFRAMEWORK_PATH" ]; then
+      RNH_HEADERS_PATH=$(find "$RNH_XCFRAMEWORK_PATH" -type d -name "Headers" | head -n 1)
+      if [ -n "$RNH_HEADERS_PATH" ]; then
+        cp -R "$RNH_HEADERS_PATH/." Headers
+      fi
+      rm -rf "$RNH_XCFRAMEWORK_PATH"
     fi
 
     mkdir -p "${XCFRAMEWORK_PATH}"
-    find "$CURRENT_PATH" -mindepth 1 -maxdepth 1 ! -name "$(basename "$XCFRAMEWORK_PATH")" -exec mv {} "$XCFRAMEWORK_PATH" \;
+    find "$CURRENT_PATH" -mindepth 1 -maxdepth 1 \
+      ! -name "$(basename "$XCFRAMEWORK_PATH")" ! -name "Headers" \
+      -exec mv {} "$XCFRAMEWORK_PATH" \;
   CMD
 
   # If we are passing a local tarball, we don't want to switch between Debug and Release

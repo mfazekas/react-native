@@ -571,11 +571,9 @@ def react_native_post_install(
     # with precompiled binaries.
     ReactNativePodsUtils.set_build_setting(installer, build_setting: "SWIFT_ENABLE_EXPLICIT_MODULES", value: "NO")
 
-    # Process the VFS overlay for prebuilt React Native Core - this is done as part of the post install so
-    # that we can update paths based on the final location of the Pods installation.
-    ReactNativeCoreUtils.process_vfs_overlay()
-
-    # Configure xcconfig for prebuilt usage (VFS overlay, header paths, cleanup redundant paths)
+    # Make the prebuilt React.xcframework headers resolvable from aggregate (main app)
+    # and third-party pod targets that don't go through add_rncore_dependency. The headers
+    # are served directly from the xcframework's headers-spec layout — no clang VFS overlay.
     ReactNativeCoreUtils.configure_aggregate_xcconfig(installer)
   end
 
